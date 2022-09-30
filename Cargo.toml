@@ -1,0 +1,10 @@
+[package]
+name = "cantaloupe"
+version = "0.9.0"
+authors = ["Jonathan Vasquez <jon@xyinn.org>"]
+edition = "2021"
+license = "BSD-2-Clause"
+description = "A simple backup replication tool for OpenZFS."
+
+[dependencies]
+clap = { version = "4.0.4", features = ["cargo", "derive"] }

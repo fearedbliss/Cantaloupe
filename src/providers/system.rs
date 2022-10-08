@@ -30,6 +30,19 @@ use crate::traits::SystemProvider;
 
 pub struct System;
 
+impl System {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn check_pool_imported_or_exit(&self, system: &impl SystemProvider, backup_pool: &str) {
+        if !system.is_pool_imported(backup_pool) {
+            println!("{} pool is not imported. Aborting.", backup_pool);
+            std::process::exit(1);
+        }
+    }
+}
+
 impl SystemProvider for System {
     fn get_all_snapshots(&self) -> Vec<Snapshot> {
         // Example

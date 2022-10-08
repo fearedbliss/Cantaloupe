@@ -39,7 +39,6 @@ impl Snapshot {
 
     pub fn from_batch(unparsed_snapshots: &Vec<&str>) -> Vec<Snapshot> {
         let mut snapshots = Vec::new();
-
         for snapshot in unparsed_snapshots {
             if !Snapshot::validate_snapshot_format(&snapshot) {
                 continue;
@@ -47,8 +46,6 @@ impl Snapshot {
 
             snapshots.push(Snapshot::new(snapshot));
         }
-
-        snapshots.sort();
         snapshots
     }
 
@@ -102,8 +99,8 @@ mod tests {
             "tank@2022-05-10-0000-00-TEST",
         ];
         let expected_snapshots = vec![
-            Snapshot::new("tank@2022-05-10-0000-00-TEST"),
             Snapshot::new("tank@2022-09-27-1300-00-TEST"),
+            Snapshot::new("tank@2022-05-10-0000-00-TEST"),
         ];
 
         let snapshots = Snapshot::from_batch(&unparsed_snapshots);

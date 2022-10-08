@@ -27,16 +27,27 @@
 use crate::snapshot::Snapshot;
 use crate::traits::SystemProvider;
 
-// Not currently used. It was before when I needed
-// to inject this dependency for testing into the core
-// system. Leaving here for now.
 pub struct FakeSystem {
     pub snapshots: Vec<Snapshot>,
+    pub is_pool_imported: bool,
+    pub send_full_backup: bool,
+    pub send_incremental_backup: bool,
 }
 
 impl FakeSystem {
-    pub fn new(snapshots: Vec<Snapshot>) -> FakeSystem {
-        FakeSystem { snapshots }
+    pub fn new() -> Self {
+        Self {
+            snapshots: vec![],
+            is_pool_imported: true,
+            send_full_backup: true,
+            send_incremental_backup: true,
+        }
+    }
+
+    pub fn new_with_snaps(snapshots: Vec<Snapshot>) -> Self {
+        let mut system = FakeSystem::new();
+        system.snapshots = snapshots;
+        system
     }
 }
 
@@ -46,11 +57,11 @@ impl SystemProvider for FakeSystem {
     }
 
     fn is_pool_imported(&self, pool_name: &str) -> bool {
-        true
+        self.is_pool_imported
     }
 
     fn send_full_backup(&self, latest_snapshot: &str, backup_dataset: &str) -> bool {
-        true
+        self.send_full_backup
     }
 
     fn send_incremental_backup(
@@ -59,7 +70,7 @@ impl SystemProvider for FakeSystem {
         latest_snapshot: &str,
         backup_dataset: &str,
     ) -> bool {
-        true
+        self.send_incremental_backup
     }
 
     fn create_dataset_tree_if_needed(&self, backup_dataset: &str) -> bool {

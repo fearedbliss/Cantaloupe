@@ -1,4 +1,4 @@
-## Cantaloupe - 0.9.0
+## Cantaloupe - 1.0.0
 ##### Jonathan Vasquez (fearedbliss)
 
 ## Description
@@ -17,14 +17,15 @@ To start using the application, all you need to do is run:
 
 ### Notes
 
-- You can pass in the **`-n`** flag for a dry run.
+- The user running this application needs to have permissions to use the
+  **`zpool`** and **`zfs`** utilities, and needs to have permission to
+  write to the disks you wish to replicate into. If you just want to
+  preview what will happen, you can perform a dry run (**`-n`**) which
+  only requires access to the zfs utilities.
+- The **`zpool`** and **`zfs`** utilities need to be in your **`PATH`**.
 - You can specify multiple datasets that are located in different pools
   in your datasets list. However, none of them may be in the same pool as
   the backup pool.
-- The **`zpool`** and **`zfs`** utilities need to be in your **`PATH`**.
-- The user running this application needs to have permissions to use the
-  **`zpool`** and **`zfs`** utilities, and needs to have permission to
-  write to the disks you wish to replicate into.
 
 ## Format
 
@@ -58,7 +59,7 @@ Arguments:
   <DATASETS>...
 
 Options:
-  -n, --dry-run
+  -n, --dry-run  Performs a dry run. Does not require root privileges.
   -h, --help     Print help information
   -V, --version  Print version information
 ```

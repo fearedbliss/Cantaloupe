@@ -23,73 +23,32 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-use std::collections::HashSet;
-
 use clap::Parser;
 
-use cantaloupe::helpers::get_source_pool_name;
-use cantaloupe::providers::system;
+use cantaloupe::helpers;
+use cantaloupe::providers::system::System;
 use cantaloupe::traits::SystemProvider;
 use cantaloupe::Cantaloupe;
 
-const APP_NAME: &str = "Cantaloupe";
-const APP_VERSION: &str = clap::crate_version!();
-const APP_AUTHOR: &str = clap::crate_authors!();
-const APP_LICENSE: &str = "Simplified BSD License";
-
-fn print_header() {
-    println!("------------------------------");
-    println!("{} - {}", APP_NAME, APP_VERSION);
-    println!("{}", APP_AUTHOR);
-    println!("{}", APP_LICENSE);
-    println!("------------------------------\n");
-}
-
-fn check_pool_imported_or_exit(system: &impl SystemProvider, backup_pool: &str) {
-    if !system.is_pool_imported(backup_pool) {
-        println!("{} pool is not imported. Aborting.", backup_pool);
-        std::process::exit(1);
-    }
-}
-
-#[derive(Parser)]
-#[command(name = APP_NAME, version)]
-struct Args {
-    #[arg(short = 'n', long)]
-    dry_run: bool,
-
-    backup_pool: String,
-    label: String,
-
-    #[arg(num_args = 1.., required = true)]
-    datasets: Vec<String>,
-}
-
 fn main() {
-    let args = Args::parse();
-    let system = system::System {};
+    let args = helpers::Args::parse();
+    let system = System::new();
 
-    print_header();
+    helpers::print_header();
 
     let backup_pool = &args.backup_pool;
     let label = &args.label;
 
     // Check if the backup pool is imported.
-    check_pool_imported_or_exit(&system, &backup_pool);
-
-    let source_pools: HashSet<&str> = args
-        .datasets
-        .iter()
-        .map(|x| get_source_pool_name(x))
-        .collect();
+    system.check_pool_imported_or_exit(&system, &backup_pool);
 
     // Check if all of the source pools are imported.
-    for source_pool in source_pools {
+    for source_pool in helpers::get_source_pool_names(&args.datasets) {
         if source_pool == backup_pool {
             println!("All source datasets must live outside of the backup pool. Aborting.");
             std::process::exit(1);
         }
-        check_pool_imported_or_exit(&system, &source_pool);
+        system.check_pool_imported_or_exit(&system, &source_pool);
     }
 
     let snapshots = system.get_all_snapshots();
@@ -103,9 +62,9 @@ fn main() {
         println!("{}", source_dataset);
         println!("---------------\n");
 
-        let program = Cantaloupe::new(&backup_pool, &source_dataset, &label);
-        let source_snapshots = program.get_source_snapshots(&snapshots);
-        let backup_snapshots = program.get_backup_snapshots(&snapshots, true);
+        let program = Cantaloupe::new(&snapshots, &backup_pool, &source_dataset, &label);
+        let source_snapshots = program.get_source_snapshots_labeled();
+        let backup_snapshots = program.get_backup_snapshots_labeled();
 
         println!("Source Snapshots Count: {}", source_snapshots.len());
         println!("Backup Snapshots Count: {}", backup_snapshots.len());
@@ -115,94 +74,77 @@ fn main() {
             continue;
         }
 
-        let latest_snapshot = program.get_latest_snapshot_name(&source_snapshots);
-        let common_snapshot = program.get_common_snapshot(&source_snapshots, &backup_snapshots);
-        let backup_dataset = program.get_backup_dataset();
+        let latest_snapshot = program.get_latest_source_snapshot_name();
+        let backup_dataset = helpers::get_backup_dataset(&backup_pool, &source_dataset);
 
         println!("Latest Snapshot: {}", latest_snapshot);
 
-        match common_snapshot {
-            Some(common_snapshot) => {
-                println!("Common Snapshot: {}", common_snapshot);
+        if let Some(common_snapshot) = program.get_common_snapshot() {
+            println!("Common Snapshot: {}", common_snapshot);
 
-                // If we are up to date, continue.
-                if common_snapshot == latest_snapshot {
-                    println!("You are already up to date!");
-                    continue;
-                }
+            // If we are up to date, continue.
+            if common_snapshot == latest_snapshot {
+                println!("You are already up to date!");
+                continue;
+            }
 
-                // Send incremental snapshot.
-                println!(
-                    "Sending incremental backup for {} -> {} ...",
-                    common_snapshot, latest_snapshot
-                );
+            // Send incremental snapshot.
+            println!(
+                "Sending incremental backup for {} -> {} ...",
+                common_snapshot, latest_snapshot
+            );
 
-                if !args.dry_run {
-                    let status = system.send_incremental_backup(
-                        &common_snapshot,
-                        &latest_snapshot,
-                        &backup_dataset,
-                    );
-
-                    match status {
-                        true => {
-                            println!("Incremental backup finished successfully!");
-                        }
-                        false => {
-                            println!("An error occurred while sending the incremental backup.");
-                        }
-                    }
-
-                    continue;
+            if !args.dry_run {
+                if system.send_incremental_backup(
+                    &common_snapshot,
+                    &latest_snapshot,
+                    &backup_dataset,
+                ) {
+                    println!("Incremental backup finished successfully!");
+                } else {
+                    println!("An error occurred while sending the incremental backup.");
                 }
             }
-            None => {
-                println!("No common snapshot found.");
-                println!("Sending full backup for {} ...", latest_snapshot);
+            continue;
+        }
 
-                // Make sure we don't already have snapshots under this dataset since
-                // we are writing to the entire dataset and want to have labeled and
-                // direct incremental writes afterwards.
-                let backup_snapshots = program.get_backup_snapshots(&snapshots, false);
+        println!("No common snapshot found.");
 
-                if backup_snapshots.len() != 0 {
-                    println!("Backup pool already contains ({}) snapshots for this dataset under a different label. Skipping.", backup_snapshots.len());
-                    continue;
-                }
+        // Make sure we don't already have snapshots under this dataset since
+        // we are writing to the entire dataset and want to have labeled and
+        // direct incremental writes afterwards.
+        let backup_snapshots = program.get_backup_snapshots();
 
-                // Create the dataset hierarchy if needed. The target backup dataset needs
-                // to exist before we attempt to send into it.
-                println!(
-                    "Creating backup dataset hierarchy for {} (if needed) ...",
-                    backup_dataset
-                );
+        if backup_snapshots.len() != 0 {
+            println!("Backup pool already contains ({}) snapshots for this dataset under a different label. Will not do a full send. Skipping.", backup_snapshots.len());
+            continue;
+        }
 
-                if !args.dry_run {
-                    if !system.create_dataset_tree_if_needed(&backup_dataset) {
-                        println!("Failed to create backup dataset hierarchy. Perhaps your user doesn't have enough permissions for the 'zfs' command?");
-                        continue;
-                    }
-                }
+        // Create the dataset hierarchy if needed. The target backup dataset needs
+        // to exist before we attempt to send into it.
+        println!(
+            "Creating backup dataset hierarchy for {} (if needed) ...",
+            backup_dataset
+        );
 
-                // Doing full send.
-                println!("Sending full backup for {} ...", latest_snapshot);
-
-                if !args.dry_run {
-                    let status = system.send_full_backup(&latest_snapshot, &backup_dataset);
-
-                    match status {
-                        true => {
-                            println!("Full backup finished successfully!");
-                        }
-                        false => {
-                            println!("An error occurred while sending the full backup.");
-                        }
-                    }
-
-                    continue;
-                }
+        if !args.dry_run {
+            if !system.create_dataset_tree_if_needed(&backup_dataset) {
+                println!("Failed to create backup dataset hierarchy. Perhaps your user doesn't have enough permissions for the 'zfs' command?");
+                continue;
             }
         }
+
+        // Doing full send.
+        println!("Sending full backup for {} ...", latest_snapshot);
+
+        if !args.dry_run {
+            if system.send_full_backup(&latest_snapshot, &backup_dataset) {
+                println!("Full backup finished successfully!");
+            } else {
+                println!("An error occurred while sending the full backup.");
+            }
+        }
+        continue;
     }
     println!("");
 }

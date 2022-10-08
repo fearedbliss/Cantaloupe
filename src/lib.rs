@@ -32,77 +32,98 @@ pub mod traits;
 use crate::snapshot::Snapshot;
 
 pub struct Cantaloupe {
+    snapshots: Vec<Snapshot>,
     backup_pool_name: String,
-    source_dataset_name: String,
+    backup_dataset_name: String,
     label: String,
+    source_snapshots_labeled: Vec<Snapshot>,
+    backup_snapshots_labeled: Vec<Snapshot>,
 }
 
 impl Cantaloupe {
-    pub fn new(backup_pool_name: &str, source_dataset_name: &str, label: &str) -> Self {
+    pub fn new(
+        pending_snapshots: &Vec<Snapshot>,
+        backup_pool_name: &str,
+        source_dataset_name: &str,
+        label: &str,
+    ) -> Self {
+        let mut snapshots = pending_snapshots.clone();
+        snapshots.sort_unstable();
+
+        let backup_dataset_name =
+            helpers::get_backup_dataset(backup_pool_name, source_dataset_name);
+        let source_snapshots_labeled =
+            Self::get_snapshots(&snapshots, &source_dataset_name, &label, true);
+        let backup_snapshots_labeled =
+            Self::get_snapshots(&snapshots, &backup_dataset_name, &label, true);
+
         Self {
+            snapshots,
             backup_pool_name: String::from(backup_pool_name),
-            source_dataset_name: String::from(source_dataset_name),
+            backup_dataset_name: backup_dataset_name,
             label: String::from(label),
+            source_snapshots_labeled,
+            backup_snapshots_labeled,
         }
     }
 
-    pub fn get_source_snapshots<'a>(&self, snapshots: &'a Vec<Snapshot>) -> Vec<&'a Snapshot> {
-        self.get_snapshots(&self.source_dataset_name, &self.label, &snapshots, true)
+    // Gets all the source snapshots matching self.label.
+    pub fn get_source_snapshots_labeled(&self) -> &Vec<Snapshot> {
+        &self.source_snapshots_labeled
     }
 
-    pub fn get_backup_snapshots<'a>(
-        &self,
-        snapshots: &'a Vec<Snapshot>,
-        use_label: bool,
-    ) -> Vec<&'a Snapshot> {
-        let backup_dataset = self.get_backup_dataset();
-        self.get_snapshots(&backup_dataset, &self.label, &snapshots, use_label)
+    // Gets all the backup snapshots matching self.label.
+    pub fn get_backup_snapshots_labeled(&self) -> &Vec<Snapshot> {
+        &self.backup_snapshots_labeled
     }
 
-    pub fn get_common_snapshot<'a>(
-        &'a self,
-        source_snapshots: &Vec<&'a Snapshot>,
-        backup_snapshots: &Vec<&Snapshot>,
-    ) -> Option<&str> {
-        for source_snapshot in source_snapshots.iter().rev() {
+    // Gets all the backup snapshots (label ignored).
+    pub fn get_backup_snapshots(&self) -> Vec<Snapshot> {
+        Self::get_snapshots(
+            &self.snapshots,
+            &self.backup_dataset_name,
+            &self.label,
+            false,
+        )
+    }
+
+    pub fn get_common_snapshot(&self) -> Option<&str> {
+        for source_snapshot in self.source_snapshots_labeled.iter().rev() {
             let backup_snapshot = format!("{}/{}", self.backup_pool_name, source_snapshot);
-            if backup_snapshots.contains(&&Snapshot::new(&backup_snapshot)) {
+            if self
+                .backup_snapshots_labeled
+                .contains(&&Snapshot::new(&backup_snapshot))
+            {
                 return Some(&source_snapshot.name);
             }
         }
         None
     }
 
-    pub fn get_latest_snapshot_name<'a>(&self, snapshots: &'a Vec<&Snapshot>) -> &'a str {
-        snapshots.last().unwrap().name.as_str()
+    pub fn get_latest_source_snapshot_name(&self) -> &str {
+        self.source_snapshots_labeled.last().unwrap().name.as_str()
     }
 
-    pub fn get_backup_dataset(&self) -> String {
-        format!("{}/{}", self.backup_pool_name, self.source_dataset_name)
-    }
-
-    fn get_snapshots<'a>(
-        &self,
+    fn get_snapshots(
+        snapshots: &Vec<Snapshot>,
         dataset_name: &str,
         label: &str,
-        snapshots: &'a Vec<Snapshot>,
         use_label: bool,
-    ) -> Vec<&'a Snapshot> {
-        let mut filtered_snapshots: Vec<&Snapshot> = Vec::new();
+    ) -> Vec<Snapshot> {
+        let mut filtered_snapshots: Vec<Snapshot> = Vec::new();
         let prefix = format!("{}@", dataset_name);
         let suffix = format!("-{}", label);
         for snapshot in snapshots {
             if snapshot.name.starts_with(&prefix) {
                 if use_label {
                     if snapshot.name.ends_with(&suffix) {
-                        filtered_snapshots.push(snapshot);
+                        filtered_snapshots.push(snapshot.clone());
                     }
                 } else {
-                    filtered_snapshots.push(snapshot);
+                    filtered_snapshots.push(snapshot.clone());
                 }
             }
         }
-        filtered_snapshots.sort();
         filtered_snapshots
     }
 }
@@ -112,28 +133,36 @@ mod tests {
     use super::*;
 
     fn get_example_snapshots() -> Vec<Snapshot> {
-        let mut snapshots = Vec::new();
-        snapshots.push(Snapshot::new("tank/var/log@2021-06-03-1800-00-TEST"));
-        snapshots.push(Snapshot::new("tank/var/log@2021-01-01-1300-12-TEST"));
-        snapshots.push(Snapshot::new("tank/var/log@2022-10-05-1953-12-TEST"));
-        snapshots.push(Snapshot::new("tank/var/log@2022-09-29-1512-00-CHECKPOINT"));
-        snapshots.push(Snapshot::new("backup/tank/var/log@2020-05-13-0013-23-TEST"));
-        snapshots.push(Snapshot::new("backup/tank/var/log@2021-07-23-0548-19-LOL"));
-        snapshots.push(Snapshot::new("backup/tank/var/log@2021-06-03-1800-00-TEST"));
-        snapshots
+        vec![
+            Snapshot::new("tank/var/log@2021-06-03-1800-00-TEST"),
+            Snapshot::new("tank/var/log@2021-01-01-1300-12-TEST"),
+            Snapshot::new("tank/var/log@2022-10-05-1953-12-TEST"),
+            Snapshot::new("tank/var/log@2022-09-29-1512-00-CHECKPOINT"),
+            Snapshot::new("tank/usr/home@2022-09-29-1512-00-ELEPHANT"),
+            Snapshot::new("backup/tank/var/log@2020-05-13-0013-23-TEST"),
+            Snapshot::new("backup/tank/var/log@2021-07-23-0548-19-LOL"),
+            Snapshot::new("backup/tank/var/log@2021-06-03-1800-00-TEST"),
+            Snapshot::new("backup/usr/ports@2021-06-03-1800-00-DOLPHIN"),
+        ]
+    }
+
+    fn get_example_snapshots_no_common_snapshots() -> Vec<Snapshot> {
+        vec![
+            Snapshot::new("tank/var/log@2021-06-03-1800-00-TEST"),
+            Snapshot::new("backup/tank/var/log@2021-07-23-0548-19-LOL"),
+        ]
     }
 
     #[test]
-    fn test_get_source_snapshots_should_return_snapshots_with_correct_label() {
-        let all_snapshots = get_example_snapshots();
-        let program = Cantaloupe::new("backup", "tank/var/log", "TEST");
+    fn test_get_source_snapshots_labeled_should_return_snapshots_with_correct_label() {
+        let program = Cantaloupe::new(&get_example_snapshots(), "backup", "tank/var/log", "TEST");
         let expected_snapshots = vec![
             Snapshot::new("tank/var/log@2021-01-01-1300-12-TEST"),
             Snapshot::new("tank/var/log@2021-06-03-1800-00-TEST"),
             Snapshot::new("tank/var/log@2022-10-05-1953-12-TEST"),
         ];
 
-        let snapshots = program.get_source_snapshots(&all_snapshots);
+        let snapshots = program.get_source_snapshots_labeled();
 
         assert_eq!(snapshots.len(), 3);
 
@@ -143,15 +172,14 @@ mod tests {
     }
 
     #[test]
-    fn test_get_backup_snapshots_should_return_snapshots_with_correct_label() {
-        let all_snapshots = get_example_snapshots();
-        let program = Cantaloupe::new("backup", "tank/var/log", "TEST");
+    fn test_get_backup_snapshots_labeled_should_return_snapshots_with_correct_label() {
+        let program = Cantaloupe::new(&get_example_snapshots(), "backup", "tank/var/log", "TEST");
         let expected_snapshots = vec![
             Snapshot::new("backup/tank/var/log@2020-05-13-0013-23-TEST"),
             Snapshot::new("backup/tank/var/log@2021-06-03-1800-00-TEST"),
         ];
 
-        let snapshots = program.get_backup_snapshots(&all_snapshots, true);
+        let snapshots = program.get_backup_snapshots_labeled();
 
         assert_eq!(snapshots.len(), 2);
 
@@ -161,16 +189,15 @@ mod tests {
     }
 
     #[test]
-    fn test_get_backup_snapshots_should_get_all_snapshots_and_not_use_label() {
-        let all_snapshots = get_example_snapshots();
-        let program = Cantaloupe::new("backup", "tank/var/log", "TEST");
+    fn test_get_backup_snapshots_should_get_all_backup_snapshots() {
+        let program = Cantaloupe::new(&get_example_snapshots(), "backup", "tank/var/log", "TEST");
         let expected_snapshots = vec![
             Snapshot::new("backup/tank/var/log@2020-05-13-0013-23-TEST"),
             Snapshot::new("backup/tank/var/log@2021-07-23-0548-19-LOL"),
             Snapshot::new("backup/tank/var/log@2021-06-03-1800-00-TEST"),
         ];
 
-        let snapshots = program.get_backup_snapshots(&all_snapshots, false);
+        let snapshots = program.get_backup_snapshots();
 
         assert_eq!(snapshots.len(), 3);
 
@@ -181,56 +208,42 @@ mod tests {
 
     #[test]
     fn test_get_common_snapshot_should_return_common_snapshot() {
-        let all_snapshots = get_example_snapshots();
-        let program = Cantaloupe::new("backup", "tank/var/log", "TEST");
-
-        let source_snapshots = program.get_source_snapshots(&all_snapshots);
-        let backup_snapshots = program.get_backup_snapshots(&all_snapshots, true);
+        let program = Cantaloupe::new(&get_example_snapshots(), "backup", "tank/var/log", "TEST");
         let expected_common_snapshot = "tank/var/log@2021-06-03-1800-00-TEST";
 
-        let common_snapshot = program.get_common_snapshot(&source_snapshots, &backup_snapshots);
+        let common_snapshot = program.get_common_snapshot();
 
         assert_eq!(common_snapshot.unwrap(), expected_common_snapshot);
     }
 
     #[test]
     fn test_get_common_snapshot_should_not_return_common_snapshot() {
-        let all_snapshots = get_example_snapshots();
-        let program = Cantaloupe::new("backup", "tank/var/log", "TEST");
+        let program = Cantaloupe::new(
+            &get_example_snapshots_no_common_snapshots(),
+            "backup",
+            "tank/var/log",
+            "TEST",
+        );
 
-        let temporary_snapshot = Snapshot::new("backup/tank/var/log@2022-01-01-0000-00-TEST");
-        let source_snapshots = program.get_source_snapshots(&all_snapshots);
-        let backup_snapshots = vec![&temporary_snapshot];
-
-        let common_snapshot = program.get_common_snapshot(&source_snapshots, &backup_snapshots);
+        let common_snapshot = program.get_common_snapshot();
 
         assert!(common_snapshot.is_none());
     }
 
     #[test]
-    fn test_get_latest_snapshot_name_should_get_latest() {
+    fn test_get_latest_source_snapshot_name_should_get_latest() {
         let snapshots = vec![
             Snapshot::new("tank/var/log@2021-07-23-0548-19-TEST"),
             Snapshot::new("tank/var/log@2020-05-13-0013-23-TEST"),
             Snapshot::new("tank/var/log@2021-06-03-1800-00-TEST"),
+            Snapshot::new("backup/tank/var/log@2022-12-10-1800-00-TEST"),
+            Snapshot::new("zebra/tank/var/log@2022-12-10-1800-00-TEST"),
         ];
-
         let expected_snapshot = "tank/var/log@2021-07-23-0548-19-TEST";
-        let program = Cantaloupe::new("backup", "tank/var/log", "TEST");
-        let references = program.get_source_snapshots(&snapshots);
+        let program = Cantaloupe::new(&snapshots, "backup", "tank/var/log", "TEST");
 
-        let snapshot = program.get_latest_snapshot_name(&references);
+        let snapshot = program.get_latest_source_snapshot_name();
 
         assert_eq!(snapshot, expected_snapshot);
-    }
-
-    #[test]
-    fn test_get_backup_dataset_should_get_name() {
-        let program = Cantaloupe::new("backup", "tank/var/log", "TEST");
-        let expected_name = "backup/tank/var/log";
-
-        let name = program.get_backup_dataset();
-
-        assert_eq!(name, expected_name);
     }
 }
